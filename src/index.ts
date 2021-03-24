@@ -1,159 +1,74 @@
-import { generateUniqueID } from "./unique";
 
-export type PresentableValue = string | number | Promise<PresentableValue>;
+export const parent = Symbol("parent");
 
-export type SideEffect = { type: string };
+type VariableTypeBuilder<Type> = (a: Type) => { [x: string]: Type };
+export type Variable<Type = any> = symbol & (VariableTypeBuilder<Type>);
+export function variable<Type = any>(description: string | number): Variable<Type> {
+  // return Symbol(description);
+  const prop = Symbol(description);
 
-const map = { "&": "amp", "<": "lt", ">": "gt", '"': "quot", "'": "#039" };
-function escapeToHTML(input) {
-  // return input.replace(/[&<>"']/g, (s) => `&${map[s]};`);
-  return input.replace(/[&<>"]/g, (s) => `&${map[s]};`);
-}
-
-function processValue(value) {
-  if (typeof value === "number") {
-    return `${value}`;
-  } else {
-    return escapeToHTML(value);
+  function result(a: Type) {
+    return { [prop]: a };
   }
+  result[Symbol.toPrimitive] = () => prop;
+
+  return result as unknown as Variable<Type>;
 }
 
-function* flatten(iterable: Iterable<any>) {
-  for (const element of iterable) {
-    if (!Boolean(element)) continue;
-    
-    if (Array.isArray(element)) {
-      yield *flatten(element);
+function defineInternal(into: object, properties: Readonly<Record<Variable, any>>) {
+  for (const prop of Object.getOwnPropertySymbols(properties)) {
+    if (typeof properties[prop] === 'function') {
+      Object.defineProperty(into, prop, {
+        enumerable: true,
+        get() {
+          return properties[prop].call(this);
+        },
+      });
     } else {
-      yield element; 
-    }
-    
-  }
-}
-
-/**
- *
- * @param {Iterable<PresentableValue>} iterable
- */
-export function* renderGenerator3(iterable) {
-  function* process(child) {
-    if (child == null || child === false) return;
-
-    if (typeof child === "string" || typeof child === "number") {
-      yield processValue(child);
-    } else if (child === Symbol.for("unique")) {
-      yield generateUniqueID("unique");
-    } else if (child instanceof String) {
-      // String objects are taken to be html-safe
-      yield child;
-    } else if (typeof child.then === "function") {
-      yield child.then((result) => Promise.all(process(result)));
-    } else if (child[Symbol.iterator]) {
-      yield* renderGenerator3(child);
-    }
-  }
-
-  for (const child of iterable) {
-    yield* process(child);
-  }
-}
-
-/**
- *
- * @param {Iterable<PresentableValue>} iterable
- */
-export function* renderGenerator(
-  iterable,
-  options: { handleEffect: (effect: SideEffect) => any }
-) {
-  const iterator = iterable[Symbol.iterator]();
-  let done = false;
-  let next;
-  while (!done) {
-    const current = iterator.next(next);
-    const child = current.value;
-    done = current.done;
-    next = undefined;
-
-    if (child == null || child === false) continue;
-
-    if (typeof child === "string" || typeof child === "number") {
-      yield processValue(child);
-    } else if (child === Symbol.for("unique")) {
-      const id = generateUniqueID("unique");
-      next = id;
-      yield id;
-    } else if (child instanceof String) {
-      // String objects are taken to be html-safe
-      yield child;
-    } else if (typeof child.then === "function") {
-      yield child.then((result) => Promise.all(renderGenerator([].concat(result), options)));
-    } else if (child[Symbol.iterator]) {
-      yield* renderGenerator(child, options);
-    } else if (typeof child.type === "string") {
-      next = options.handleEffect(child);
+      Object.defineProperty(into, prop, { value: Object.freeze(properties[prop]), enumerable: true });
     }
   }
 }
 
-/**
- *
- * @param {Generator} children
- * @return {Promise<string>}
- */
-export async function renderToString(
-  children,
-  options: { handleEffect: (effect: SideEffect) => any } = { handleEffect() {} }
-) {
-  const resolved = await Promise.all(renderGenerator(children, options));
-  return Array.from(flatten(resolved)).join("");
+export function declare(properties: Readonly<Record<Variable, any>>): typeof properties {
+  const result = {};
+  defineInternal(result, properties);
+  return Object.freeze(result);
 }
 
-export function* html(literals, ...values) {
-  for (let i = 0; i < literals.length; i++) {
-    yield new String(literals[i]); // Mark as html-safe by converting to string object
-    if (values[i] != null && values[i] !== false) {
-      yield values[i];
+export function fork(source: Readonly<Record<Variable, any>>, changes: Readonly<Record<Variable, any>>): typeof source {
+  const result = Object.create(source);
+  defineInternal(result, changes);
+  Object.defineProperty(result, parent, { value: source, enumerable: true });
+  // Object.setPrototypeOf(result, source);
+  return Object.freeze(result);
+}
+
+export function changing<Value = any>(prop: Variable<Value>, transform: (a: Value) => Value): { [x: string]: () => Value; } {
+  return {
+    [prop]() {
+      const current: Value = this[parent][prop];
+      return transform(current);
     }
   }
 }
 
-export function* attributes(
-  items: Record<string, PresentableValue> | Iterable<[string, PresentableValue]>
-) {
-  const iterable = items[Symbol.iterator]
-    ? (items as Iterable<[string, PresentableValue]>)
-    : Object.entries(items);
-
-  let count = 0;
-  for (const [key, value] of iterable) {
-    if (count > 0) yield " ";
-    yield key;
-    yield "=";
-    yield html`"`;
-    yield value;
-    yield html`"`;
-    count += 1;
+export function prepending<Value = any>(prop: Variable<Array<Value>>, value: Value): { [prop: string]: () => Generator<Value, void, undefined>; } {
+  return {
+    *[prop]() {
+      const current: Array<Value> = this[parent][prop];
+      yield value;
+      yield* current;
+    }
   }
 }
 
-export function* dataset(
-  items: Record<string, PresentableValue> | Iterable<[string, PresentableValue]>
-) {
-  const iterable = items[Symbol.iterator]
-    ? (items as Iterable<[String, String]>)
-    : Object.entries(items);
-
-  yield* attributes(
-    (function* () {
-      for (const [key, value] of iterable) {
-        const keyKebab = key.replace(/[A-Z]/g, "-$&").toLowerCase();
-        yield [`data-${keyKebab}`, value] as [string, PresentableValue];
-      }
-    })()
-  );
-}
-
-export function unique() {
-  return Symbol.for("unique");
+export function appending<Value = any>(prop: Variable<Array<Value>>, value: Value): { [prop: string]: () => Generator<Value, void, undefined>; } {
+  return {
+    *[prop]() {
+      const current: Array<Value> = this[parent][prop];
+      yield* current;
+      yield value;
+    }
+  }
 }
