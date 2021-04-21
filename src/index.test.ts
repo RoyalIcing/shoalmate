@@ -323,6 +323,7 @@ describe("Clocks", () => {
     
     expect(clock.uniqueCount([])).toBe(0);
     expect(clock.uniqueCount([reader1A])).toBe(1);
+    expect(clock.uniqueCount([reader1A, reader1A, reader1A])).toBe(1);
     expect(clock.uniqueCount([reader1A, reader1B])).toBe(1);
     expect(clock.uniqueCount([reader1A, reader1B, reader2A])).toBe(2);
     expect(clock.uniqueCount([reader1A, reader1B, reader2A, reader2B])).toBe(2);
