@@ -1,4 +1,4 @@
-import { declare, fork, parent, variable, compound, adding, prepending, appending, changing, makeClock, readStateFor, setStateFor } from "./index";
+import { declare, fork, parent, variable, compound, cursorSymbol, adding, prepending, appending, changing, makeClock, readStateFor, setStateFor } from "./index";
 
 describe("declare()", () => {
   const Counter = variable("Counter");
@@ -238,6 +238,16 @@ describe("Clocks", () => {
     expect(readStateFor(clock.currentCursor)(Symbol())).toBeUndefined();
   });
 
+  it("has reader and write with cursor references", () => {
+    const clock = makeClock();
+    
+    expect(clock.reader()[Symbol.toPrimitive]()).toBe(clock.currentCursor);
+    expect(clock.reader()[cursorSymbol]()).toBe(clock.currentCursor);
+    
+    expect(clock.writer()[Symbol.toPrimitive]()).toBe(clock.currentCursor);
+    expect(clock.writer()[cursorSymbol]()).toBe(clock.currentCursor);
+  });
+  
   it("stores state", () => {
     const clock = makeClock();
     const key = Symbol();
@@ -297,6 +307,25 @@ describe("Clocks", () => {
     
     expect(reader(key)).toBe(7);
     expect(clock.reader()(key)).toBe(7);
+  });
+  
+  it("counts unique readers", () => {
+    const clock = makeClock();
+    const key = Symbol();
+    
+    const reader1A = clock.reader();
+    const reader1B = clock.reader();
+    
+    clock.advance();
+    
+    const reader2A = clock.reader();
+    const reader2B = clock.reader();
+    
+    expect(clock.uniqueCount([])).toBe(0);
+    expect(clock.uniqueCount([reader1A])).toBe(1);
+    expect(clock.uniqueCount([reader1A, reader1B])).toBe(1);
+    expect(clock.uniqueCount([reader1A, reader1B, reader2A])).toBe(2);
+    expect(clock.uniqueCount([reader1A, reader1B, reader2A, reader2B])).toBe(2);
   });
 
   /*it("copies state after advancing", () => {

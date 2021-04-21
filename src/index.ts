@@ -86,10 +86,13 @@ export function appending<Value = any>(prop: Variable<Array<Value>>, value: Valu
   }
 }
 
+export const cursorSymbol = Symbol("cursor");
+
 export interface Cursor { readonly id: symbol };
 
 function makeCursor(value: string | number): Cursor {
-  return Object.freeze({ id: Symbol(value) });
+  const id = Symbol(value);
+  return Object.freeze({ id, [Symbol.toPrimitive]() { return id } });
 }
 
 function getCursorNumber(cursor: Cursor): number {
@@ -109,7 +112,7 @@ export interface Clock {
   reader(): (key: symbol) => unknown | undefined;
   writer(): (key: symbol, value: any) => unknown | undefined;
   advance(): void;
-  uniqueCount(cursors: Iterable<Cursor>): number;
+  uniqueCount(cursors: Iterable<Cursor | Function>): number;
   mostRecent(cursors: Iterable<Cursor>): Cursor;
 }
 
@@ -119,18 +122,25 @@ export function makeClock(): Clock {
   return {
     currentCursor: makeCursor(vectorClock),
     reader() {
-      return readStateFor(this.currentCursor);
+      const cursor = this.currentCursor;
+      const f = readStateFor(cursor);
+      f[Symbol.toPrimitive] = () => cursor;
+      f[cursorSymbol] = () => cursor;
+      return f;
     },
     writer() {
-      const initial = this.currentCursor;
-      return (key, value) => {
-        if (initial !== this.currentCursor) {
+      const cursor = this.currentCursor;
+      const f = (key, value) => {
+        if (cursor !== this.currentCursor) {
           // Ignore
           return;
         }
         
         return setStateFor(this.currentCursor)(key, value);
       }
+      f[Symbol.toPrimitive] = () => cursor;
+      f[cursorSymbol] = () => cursor;
+      return f;
     },
     advance() {
       vectorClock++;
@@ -138,8 +148,12 @@ export function makeClock(): Clock {
       copyStateFromTo(this.currentCursor, newCursor);
       this.currentCursor = newCursor;
     },
-    uniqueCount(cursors: Iterable<Cursor>) {
-      return (new Set(cursors)).size;
+    uniqueCount(cursors: Iterable<Cursor | Function>) {
+      const unique = new Set();
+      for (const s of cursors) {
+        unique.add(s[Symbol.toPrimitive]());
+      }
+      return unique.size;
     },
     mostRecent(cursors: Iterable<Cursor>) {
       const array = Array.from(cursors);
