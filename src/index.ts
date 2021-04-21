@@ -53,6 +53,15 @@ export function changing<Value = any>(prop: Variable<Value>, transform: (a: Valu
   }
 }
 
+export function adding(prop: Variable<number>, amount: number): { [x: string]: () => number; } {
+  return {
+    [prop]() {
+      const current: number = this[parent][prop];
+      return current + amount;
+    }
+  }
+}
+
 export function prepending<Value = any>(prop: Variable<Array<Value>>, value: Value): { [prop: string]: () => Generator<Value, void, undefined>; } {
   return {
     *[prop]() {
@@ -72,3 +81,90 @@ export function appending<Value = any>(prop: Variable<Array<Value>>, value: Valu
     }
   }
 }
+
+export interface Cursor { readonly id: symbol };
+
+function makeCursor(value: string | number): Cursor {
+  return Object.freeze({ id: Symbol(value) });
+}
+
+function getCursorNumber(cursor: Cursor): number {
+  return parseFloat(cursor.id.description ?? "-1") || -1;
+}
+
+const sharedState = new WeakMap<Cursor, Map<symbol, any>>();
+
+function copyStateFromTo(cursorA: Cursor, cursorB: Cursor): void {
+  const state = sharedState.get(cursorA);
+  const copiedState = state === undefined ? new Map() : new Map(state);
+  sharedState.set(cursorB, copiedState);
+}
+
+export interface Clock {
+  readonly currentCursor: Cursor;
+  reader(): (key: symbol) => unknown | undefined;
+  advance(): void;
+  uniqueCount(cursors: Iterable<Cursor>): number;
+  mostRecent(cursors: Iterable<Cursor>): Cursor;
+}
+
+export function makeClock(): Clock {
+  let vectorClock = 0;
+
+  return {
+    currentCursor: makeCursor(vectorClock),
+    reader() {
+      return readStateFor(this.currentCursor);
+    },
+    advance() {
+      vectorClock++;
+      const newCursor = makeCursor(vectorClock);
+      copyStateFromTo(this.currentCursor, newCursor);
+      this.currentCursor = newCursor;
+    },
+    uniqueCount(cursors: Iterable<Cursor>) {
+      return (new Set(cursors)).size;
+    },
+    mostRecent(cursors: Iterable<Cursor>) {
+      const array = Array.from(cursors);
+      if (array.length === 0) {
+        throw new Error("Must pass non-empty iterable to mostRecent()");
+      }
+      return array.reduce((candidate, next) => {
+        if (getCursorNumber(next) > getCursorNumber(candidate)) {
+          return next;
+        }
+        return candidate;
+      })
+    }
+  };
+}
+
+export function readStateFor(cursor: Cursor): (key: symbol) => any | undefined {
+  return key => {
+    const state = sharedState.get(cursor);
+    return state?.get(key);
+  }
+}
+
+export function setStateFor(cursor: Cursor, key: symbol, value: any) {
+  let state = sharedState.get(cursor);
+  if (state === undefined) {
+    state = new Map();
+    state.set(key, value);
+    sharedState.set(cursor, state);
+  } else {
+    state.set(key, value);
+  }
+}
+
+/*export function updateStateFor(cursor: Cursor, key: symbol, value: any) {
+  let state = sharedState.get(cursor);
+  if (state === undefined) {
+    state = new Map();
+    state.set(key, value);
+    sharedState.set(cursor, state);
+  } else {
+    state.set(key, value);
+  }
+}*/
