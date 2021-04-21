@@ -1,4 +1,4 @@
-import { declare, fork, parent, variable, adding, prepending, appending, changing, makeClock, readStateFor, setStateFor } from "./index";
+import { declare, fork, parent, variable, compound, adding, prepending, appending, changing, makeClock, readStateFor, setStateFor } from "./index";
 
 describe("declare()", () => {
   const Counter = variable("Counter");
@@ -46,6 +46,33 @@ describe("declare()", () => {
   
     it("has symbol properties", () => {
       expect(Object.getOwnPropertySymbols(c)).toHaveLength(1);
+    });
+
+    it("JSON stringifies into empty object", () => {
+      expect(JSON.stringify(c)).toEqual("{}");
+    });
+  });
+  
+  describe("compound", () => {
+    const Other = variable<number>("Other");
+    
+    const c = declare(compound(Counter(42), Other(7)));
+  
+    it("is frozen", () => {
+      expect(Object.isFrozen(c)).toBe(true);
+    });
+  
+    it("can read properties", () => {
+      expect(c[Counter]).toEqual(42);
+      expect(c[Other]).toEqual(7);
+    });
+  
+    it("has no string keys", () => {
+      expect(Object.keys(c)).toHaveLength(0);
+    });
+  
+    it("has symbol properties", () => {
+      expect(Object.getOwnPropertySymbols(c)).toHaveLength(2);
     });
 
     it("JSON stringifies into empty object", () => {
@@ -158,16 +185,18 @@ describe("fork()", () => {
   
   describe("incrementing number with adding()", () => {
     const c1 = declare({ [Counter]: 3 });
-    const c2 = fork(c1, {
+    const c2 = fork(c1, adding(Counter, 1));
+    const c3 = fork(c2, {
       [Counter]() {
         return this[parent][Counter] + 1;
       }
     });
-    const c3 = fork(c2, adding(Counter, 1));
+    const c4 = fork(c3, adding(Counter, 1));
   
     it("adds up", () => {
       expect(c2[Counter]).toEqual(4);
       expect(c3[Counter]).toEqual(5);
+      expect(c4[Counter]).toEqual(6);
     });
   });
 
@@ -177,10 +206,15 @@ describe("fork()", () => {
     const c1 = declare({
       [Todos]: ["first", "second"],
     });
-    const c2 = fork(c1, appending(Todos, "end"));
+    const c2 = fork(c1, appending(Todos, "third"));
+    const c3 = fork(c2, appending(Todos, "fourth"));
+    const c2B = fork(c1, appending(Todos, "other"));
   
     it("yields with value appended", () => {
-      expect(Array.from(c2[Todos])).toEqual(["first", "second", "end"]);
+      expect(Array.from(c1[Todos])).toEqual(["first", "second"]);
+      expect(Array.from(c2[Todos])).toEqual(["first", "second", "third"]);
+      expect(Array.from(c3[Todos])).toEqual(["first", "second", "third", "fourth"]);
+      expect(Array.from(c2B[Todos])).toEqual(["first", "second", "other"]);
     });
   });
 
@@ -207,7 +241,7 @@ describe("Clocks", () => {
   it("stores state", () => {
     const clock = makeClock();
     const key = Symbol();
-    setStateFor(clock.currentCursor, key, 7);
+    setStateFor(clock.currentCursor)(key, 7);
     
     expect(readStateFor(clock.currentCursor)(key)).toBe(7);
     expect(clock.reader()(key)).toBe(7);
@@ -225,7 +259,7 @@ describe("Clocks", () => {
     const clock = makeClock();
     const key = Symbol();
     const reader = clock.reader();
-    setStateFor(clock.currentCursor, key, 7);
+    setStateFor(clock.currentCursor)(key, 7);
     clock.advance();
     expect(readStateFor(clock.currentCursor)(key)).toBe(7);
     
@@ -238,17 +272,31 @@ describe("Clocks", () => {
     const key = Symbol();
     const reader = clock.reader();
     const cursorA = clock.currentCursor;
-    setStateFor(cursorA, key, 7);
+    setStateFor(cursorA)(key, 7);
     clock.advance();
     
     const cursorB = clock.currentCursor;
-    setStateFor(cursorB, key, 9);
+    setStateFor(cursorB)(key, 9);
 
     expect(readStateFor(cursorA)(key)).toBe(7);
     expect(readStateFor(clock.currentCursor)(key)).toBe(9);
     
     expect(reader(key)).toBe(7);
     expect(clock.reader()(key)).toBe(9);
+  });
+  
+  it("rejects state changes if clock has been advanced", () => {
+    const clock = makeClock();
+    const key = Symbol();
+    const writer = clock.writer();
+    writer(key, 7);
+    const reader = clock.reader();
+    
+    clock.advance();
+    writer(key, 8);
+    
+    expect(reader(key)).toBe(7);
+    expect(clock.reader()(key)).toBe(7);
   });
 
   /*it("copies state after advancing", () => {

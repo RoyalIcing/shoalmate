@@ -15,6 +15,10 @@ export function variable<Type = any>(description: string | number): Variable<Typ
   return result as unknown as Variable<Type>;
 }
 
+export function compound<Types = any>(...values: Array<{ [x: string]: Types }>): { [x: string]: Types } {
+  return Object.assign({}, ...values);
+}
+
 function defineInternal(into: object, properties: Readonly<Record<Variable, any>>) {
   for (const prop of Object.getOwnPropertySymbols(properties)) {
     if (typeof properties[prop] === 'function') {
@@ -103,6 +107,7 @@ function copyStateFromTo(cursorA: Cursor, cursorB: Cursor): void {
 export interface Clock {
   readonly currentCursor: Cursor;
   reader(): (key: symbol) => unknown | undefined;
+  writer(): (key: symbol, value: any) => unknown | undefined;
   advance(): void;
   uniqueCount(cursors: Iterable<Cursor>): number;
   mostRecent(cursors: Iterable<Cursor>): Cursor;
@@ -115,6 +120,17 @@ export function makeClock(): Clock {
     currentCursor: makeCursor(vectorClock),
     reader() {
       return readStateFor(this.currentCursor);
+    },
+    writer() {
+      const initial = this.currentCursor;
+      return (key, value) => {
+        if (initial !== this.currentCursor) {
+          // Ignore
+          return;
+        }
+        
+        return setStateFor(this.currentCursor)(key, value);
+      }
     },
     advance() {
       vectorClock++;
@@ -147,14 +163,16 @@ export function readStateFor(cursor: Cursor): (key: symbol) => any | undefined {
   }
 }
 
-export function setStateFor(cursor: Cursor, key: symbol, value: any) {
-  let state = sharedState.get(cursor);
-  if (state === undefined) {
-    state = new Map();
-    state.set(key, value);
-    sharedState.set(cursor, state);
-  } else {
-    state.set(key, value);
+export function setStateFor(cursor: Cursor): (key: symbol, value: any) => void {
+  return (key, value) => {
+    let state = sharedState.get(cursor);
+    if (state === undefined) {
+      state = new Map();
+      state.set(key, value);
+      sharedState.set(cursor, state);
+    } else {
+      state.set(key, value);
+    }
   }
 }
 
