@@ -8,7 +8,7 @@ export function variable<Type = any>(description: string | number): Variable<Typ
   const prop = Symbol(description);
 
   function result(a: Type) {
-    return { [prop]: a };
+    return Object.freeze({ [prop]: a });
   }
   result[Symbol.toPrimitive] = () => prop;
 
@@ -16,7 +16,7 @@ export function variable<Type = any>(description: string | number): Variable<Typ
 }
 
 export function compound<Types = any>(...values: Array<{ [x: string]: Types }>): { [x: string]: Types } {
-  return Object.assign({}, ...values);
+  return Object.freeze(Object.assign({}, ...values));
 }
 
 function defineInternal(into: object, properties: Readonly<Record<Variable, any>>) {
@@ -48,55 +48,65 @@ export function fork(source: Readonly<Record<Variable, any>>, changes: Readonly<
   return Object.freeze(result);
 }
 
-export function changing<Value = any>(prop: Variable<Value>, transform: (a: Value) => Value): { [x: string]: () => Value; } {
-  return {
+export function changing<Value = any, Output = any>(prop: Variable<Value>, transform: (a: Value) => Output): { [x: string]: () => Output; } {
+  return Object.freeze({
     [prop]() {
       const current: Value = this[parent][prop];
       return transform(current);
     }
-  }
+  });
 }
 
 export function adding(prop: Variable<number>, amount: number): { [x: string]: () => number; } {
-  return {
+  return Object.freeze({
     [prop]() {
       const current: number = this[parent][prop];
       return current + amount;
     }
-  }
+  });
 }
 
-export function prepending<Value = any>(prop: Variable<Array<Value>>, value: Value): { [prop: string]: () => Generator<Value, void, undefined>; } {
-  return {
+export function prepending<Value = any>(prop: Variable<Iterable<Value>>, value: Value): { [prop: string]: () => Generator<Value, void, undefined>; } {
+  return Object.freeze({
     *[prop]() {
-      const current: Array<Value> = this[parent][prop];
+      const current: Iterable<Value> = this[parent][prop];
       yield value;
       yield* current;
     }
-  }
+  });
 }
 
-export function appending<Value = any>(prop: Variable<Array<Value>>, value: Value): { [prop: string]: () => Generator<Value, void, undefined>; } {
-  return {
+export function appending<Value = any>(prop: Variable<Iterable<Value>>, value: Value): { [prop: string]: () => Generator<Value, void, undefined>; } {
+  return Object.freeze({
     *[prop]() {
-      const current: Array<Value> = this[parent][prop];
+      const current: Iterable<Value> = this[parent][prop];
       yield* current;
       yield value;
     }
-  }
+  });
+}
+
+export function mapping<Value = any, Output = any>(prop: Variable<Iterable<Value>>, transform: (a: Value) => Output): { [prop: string]: () => Generator<Output, void, undefined>; } {
+  return Object.freeze({
+    *[prop]() {
+      const current: Iterable<Value> = this[parent][prop];
+      for (const value of current) {
+        yield transform(value);
+      }
+    }
+  });
 }
 
 export const cursorSymbol = Symbol("cursor");
 
-export interface Cursor { readonly id: symbol };
+export interface Cursor { readonly description: string };
 
 function makeCursor(value: string | number): Cursor {
-  const id = Symbol(value);
-  return Object.freeze({ id, [Symbol.toPrimitive]() { return id } });
+  return Object.freeze(Object(Symbol(value)));
 }
 
 function getCursorNumber(cursor: Cursor): number {
-  return parseFloat(cursor.id.description ?? "-1") || -1;
+  return parseFloat(cursor.description ?? "-1") || -1;
 }
 
 const sharedState = new WeakMap<Cursor, Map<symbol, any>>();

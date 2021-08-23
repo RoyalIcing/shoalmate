@@ -1,4 +1,4 @@
-import { declare, fork, parent, variable, compound, cursorSymbol, adding, prepending, appending, changing, makeClock, readStateFor, setStateFor } from "./index";
+import { declare, fork, parent, variable, compound, cursorSymbol, adding, prepending, appending, changing, makeClock, readStateFor, setStateFor, mapping } from "./index";
 
 describe("declare()", () => {
   const Counter = variable("Counter");
@@ -185,6 +185,7 @@ describe("fork()", () => {
   
   describe("incrementing number with adding()", () => {
     const c1 = declare({ [Counter]: 3 });
+    // const c1 = declare(Counter(3));
     const c2 = fork(c1, adding(Counter, 1));
     const c3 = fork(c2, {
       [Counter]() {
@@ -221,13 +222,23 @@ describe("fork()", () => {
   describe("prepending to array", () => {
     const Todos = variable("Todos");
     
-    const c1 = declare({
-      [Todos]: ["first", "second"],
-    });
+    const c1 = declare({ [Todos]: ["first", "second"] });
+    // const c1 = declare(Todos(["first", "second"]));
     const c2 = fork(c1, prepending(Todos, "start"));
   
     it("yields with value prepended", () => {
       expect(Array.from(c2[Todos])).toEqual(["start", "first", "second"]);
+    });
+  });
+
+  describe("mapping an array", () => {
+    const Todos = variable<string[]>("Todos");
+    
+    const c1 = declare(Todos(["first", "second"]));
+    const c2 = fork(c1, mapping(Todos, s => s.toUpperCase()));
+  
+    it("yields with strings uppercased", () => {
+      expect(Array.from(c2[Todos])).toEqual(["FIRST", "SECOND"]);
     });
   });
 });
@@ -295,7 +306,7 @@ describe("Clocks", () => {
     expect(clock.reader()(key)).toBe(9);
   });
   
-  it("rejects state changes if clock has been advanced", () => {
+  it("ignores state changes if clock has been advanced", () => {
     const clock = makeClock();
     const key = Symbol();
     const writer = clock.writer();
@@ -311,7 +322,6 @@ describe("Clocks", () => {
   
   it("counts unique readers", () => {
     const clock = makeClock();
-    const key = Symbol();
     
     const reader1A = clock.reader();
     const reader1B = clock.reader();
@@ -328,21 +338,4 @@ describe("Clocks", () => {
     expect(clock.uniqueCount([reader1A, reader1B, reader2A])).toBe(2);
     expect(clock.uniqueCount([reader1A, reader1B, reader2A, reader2B])).toBe(2);
   });
-
-  /*it("copies state after advancing", () => {
-    const clock = makeClock();
-    const key = Symbol();
-    const cursorA = clock.currentCursor;
-    setState(key, 7);
-    // cursorA[key] = 9;
-    // cursorA.freeze();
-    
-    clock.advance();
-
-    setState(key, 9);
-    // cursorA[key] = 9;
-
-    expect(readStateFor(cursorA, key)).toBe(7);
-    expect(readStateFor(clock.currentCursor, key)).toBe(9);
-  });*/
 })
