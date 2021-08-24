@@ -1,18 +1,47 @@
-
 export const parent = Symbol("parent");
 
 type VariableTypeBuilder<Type> = (a: Type) => { [x: string]: Type };
 export type Variable<Type = any> = symbol & (VariableTypeBuilder<Type>);
+export type VariableValue<V extends Variable> = V extends VariableTypeBuilder<infer Value> ? Record<symbol, Value> : never;
+
+const field = Symbol("field");
+interface Field<Value> {
+  [field]: Value;
+}
+
 export function variable<Type = any>(description: string | number): Variable<Type> {
   // return Symbol(description);
   const prop = Symbol(description);
 
-  function result(a: Type) {
-    return Object.freeze({ [prop]: a });
+  function result(a: Readonly<Type | ((source: any) => Type)>) {
+    if (typeof a === 'function') {
+      return Object.freeze({
+        [prop]() {
+          return a.call(this, this);
+        }
+      })
+    } else {
+      return Object.freeze({ [prop]: a });
+    }
   }
   result[Symbol.toPrimitive] = () => prop;
 
   return result as unknown as Variable<Type>;
+}
+
+export function struct<Fields extends Array<Variable>>(description: string | number, ...fields: Fields): Variable<{ [i in keyof Fields]: Fields[i] extends Variable<infer Value> ? { [x: string]: Value } : void }> {
+  const prop = Symbol(description);
+
+  function result(values: Fields extends Array<Variable<infer V>> ? V : never) {
+    if (Array.isArray(values)) {
+      return create(compound(...(values as any[])));
+    } else {
+      return null;
+    }
+  }
+  result[Symbol.toPrimitive] = () => prop;
+
+  return result as unknown as any;
 }
 
 export function compound<Types = any>(...values: Array<{ [x: string]: Types }>): { [x: string]: Types } {
@@ -24,9 +53,10 @@ function defineInternal(into: object, properties: Readonly<Record<Variable, any>
     if (typeof properties[prop] === 'function') {
       Object.defineProperty(into, prop, {
         enumerable: true,
-        get() {
-          return properties[prop].call(this);
-        },
+        // get() {
+        //   return properties[prop].call(this);
+        // },
+        get: properties[prop],
       });
     } else {
       Object.defineProperty(into, prop, { value: Object.freeze(properties[prop]), enumerable: true });
@@ -34,7 +64,7 @@ function defineInternal(into: object, properties: Readonly<Record<Variable, any>
   }
 }
 
-export function declare(properties: Readonly<Record<Variable, any>>): typeof properties {
+export function create(properties: Readonly<Record<Variable, any>>): typeof properties {
   const result = {};
   defineInternal(result, properties);
   return Object.freeze(result);
@@ -97,6 +127,23 @@ export function mapping<Value = any, Output = any>(prop: Variable<Iterable<Value
   });
 }
 
+export function createHistory<Value>(initial: Readonly<Record<Variable<Value>, any>>) {
+  let current = initial;
+  const stack = [current] as any[];
+
+  return Object.seal({
+    get(index: number) {
+      return stack[index];
+    },
+    push(changes: Readonly<Record<Variable, any>>): void {
+      current = fork(current, changes);
+      stack.push(current);
+    }
+  });
+}
+
+/////////
+
 export const cursorSymbol = Symbol("cursor");
 
 export interface Cursor { readonly description: string };
@@ -129,16 +176,16 @@ export interface Clock {
 export function makeClock(): Clock {
   let vectorClock = 0;
 
-  return {
+  return Object.seal({
     currentCursor: makeCursor(vectorClock),
-    reader() {
+    reader(): (key: symbol) => unknown {
       const cursor = this.currentCursor;
       const f = readStateFor(cursor);
       f[Symbol.toPrimitive] = () => cursor;
       f[cursorSymbol] = () => cursor;
       return f;
     },
-    writer() {
+    writer(): (key: symbol, value: any) => void {
       const cursor = this.currentCursor;
       const f = (key, value) => {
         if (cursor !== this.currentCursor) {
@@ -146,26 +193,26 @@ export function makeClock(): Clock {
           return;
         }
         
-        return setStateFor(this.currentCursor)(key, value);
+        setStateFor(this.currentCursor)(key, value);
       }
       f[Symbol.toPrimitive] = () => cursor;
       f[cursorSymbol] = () => cursor;
       return f;
     },
-    advance() {
+    advance(): void {
       vectorClock++;
       const newCursor = makeCursor(vectorClock);
       copyStateFromTo(this.currentCursor, newCursor);
       this.currentCursor = newCursor;
     },
-    uniqueCount(cursors: Iterable<Cursor | Function>) {
+    uniqueCount(cursors: Iterable<Cursor | Function>): number {
       const unique = new Set();
       for (const s of cursors) {
-        unique.add(s[Symbol.toPrimitive]());
+        unique.add(s[cursorSymbol]());
       }
       return unique.size;
     },
-    mostRecent(cursors: Iterable<Cursor>) {
+    mostRecent(cursors: Iterable<Cursor>): Cursor {
       const array = Array.from(cursors);
       if (array.length === 0) {
         throw new Error("Must pass non-empty iterable to mostRecent()");
@@ -177,7 +224,7 @@ export function makeClock(): Clock {
         return candidate;
       })
     }
-  };
+  });
 }
 
 export function readStateFor(cursor: Cursor): (key: symbol) => any | undefined {
