@@ -1,7 +1,7 @@
 import {
   create,
   fork,
-  parent,
+  Parent,
   variable,
   compound,
   cursorSymbol,
@@ -19,7 +19,7 @@ import {
 } from "./index";
 
 describe("declare()", () => {
-  const Counter = variable("Counter");
+  const Counter = variable("Counter", 0);
 
   describe("single number property", () => {
     const c = create({
@@ -72,7 +72,7 @@ describe("declare()", () => {
   });
 
   describe("compound", () => {
-    const Other = variable<number>("Other");
+    const Other = variable("Other", 0);
 
     const c = create(compound(Counter(42), Other(7)));
 
@@ -99,7 +99,7 @@ describe("declare()", () => {
   });
 
   describe("calculated property", () => {
-    const DoubleCounter = variable("DoubleCounter");
+    const DoubleCounter = variable("DoubleCounter", 0);
 
     const c = create({
       [Counter]: 7,
@@ -126,12 +126,13 @@ describe("declare()", () => {
   });
 
   describe("calculated property using call syntax", () => {
-    const DoubleCounter = variable("DoubleCounter");
+    const DoubleCounter = variable("DoubleCounter", 0);
 
     const c = create(
       compound(
         Counter(7),
         DoubleCounter((self: {}) => self[Counter] * 2)
+        // DoubleCounter(function() { return this[Counter] * 2 })
       )
     );
     // const c = declare(compound(Counter(7), DoubleCounter(function() { return this[Counter] * 2 })));
@@ -156,8 +157,8 @@ describe("declare()", () => {
 });
 
 describe("fork()", () => {
-  const Counter = variable("Counter");
-  const Pi = variable("Pi");
+  const Counter = variable("Counter", 0);
+  const Pi = variable("Pi", 3.14);
 
   describe("changing existing property", () => {
     const c1 = create({
@@ -168,7 +169,7 @@ describe("fork()", () => {
     // const c2 = fork(c1, Counter(1));
 
     it("has reference to parent", () => {
-      expect(c2[parent]).toBe(c1);
+      expect(c2[Parent]).toBe(c1);
     });
 
     it("is frozen", () => {
@@ -197,7 +198,7 @@ describe("fork()", () => {
   });
 
   describe("changing source of calculated property", () => {
-    const DoubleCounter = variable("DoubleCounter");
+    const DoubleCounter = variable("DoubleCounter", 0);
 
     const c1 = create({
       [Counter]: 7,
@@ -220,7 +221,7 @@ describe("fork()", () => {
     const c1 = create({ [Counter]: 3 });
     const c2 = fork(c1, {
       [Counter]() {
-        return this[parent][Counter] + 1;
+        return this[Parent][Counter] + 1;
       },
     });
     const c3 = fork(
@@ -240,7 +241,7 @@ describe("fork()", () => {
     const c2 = fork(c1, adding(Counter, 1));
     const c3 = fork(c2, {
       [Counter]() {
-        return this[parent][Counter] + 1;
+        return this[Parent][Counter] + 1;
       },
     });
     const c4 = fork(c3, adding(Counter, 1));
@@ -253,7 +254,7 @@ describe("fork()", () => {
   });
 
   describe("appending to array", () => {
-    const Todos = variable("Todos");
+    const Todos = variable("Todos", [] as string[]);
 
     const c1 = create(Todos(["first", "second"]));
     const c2 = fork(c1, appending(Todos, "third"));
@@ -274,7 +275,7 @@ describe("fork()", () => {
   });
 
   describe("prepending to array", () => {
-    const Todos = variable("Todos");
+    const Todos = variable("Todos", [] as string[]);
 
     const c1 = Todos(["first", "second"]);
     const c2 = fork(c1, prepending(Todos, "start"));
@@ -285,7 +286,7 @@ describe("fork()", () => {
   });
 
   describe("mapping an array", () => {
-    const Todos = variable<string[]>("Todos");
+    const Todos = variable("Todos", [] as string[]);
 
     const c1 = Todos(["first", "second"]);
     const c2 = fork(
@@ -299,8 +300,8 @@ describe("fork()", () => {
   });
 
   describe("struct", () => {
-    const Description = variable<string>("Description");
-    const Completed = variable<boolean>("Completed");
+    const Description = variable("Description", "");
+    const Completed = variable("Completed", false);
     const Todo = struct("Todo", Description, Completed);
 
     const c1 = Todo([Description("Write todo list app"), Completed(false)]);
@@ -314,10 +315,10 @@ describe("fork()", () => {
   });
 
   describe("array of structs", () => {
-    const Description = variable<string>("Description");
-    const Completed = variable<boolean>("Completed");
+    const Description = variable("Description", "");
+    const Completed = variable("Completed", false);
     const Todo = struct("Todo", Description, Completed);
-    const Todos = variable<Array<VariableValue<typeof Todo>>>("Todos");
+    const Todos = variable("Todos", [] as Array<VariableValue<typeof Todo>>);
 
     const c1 = Todos([
       Todo([Description("Write todo list app"), Completed(false)]),
@@ -357,10 +358,11 @@ describe("fork()", () => {
 });
 
 describe("undo/redo with array of structs", () => {
-  const Description = variable<string>("Description");
-  const Completed = variable<boolean>("Completed");
+  const Description = variable("Description", "");
+  const Completed = variable("Completed", false);
+  // const Overdue = variable("Overdue", false);
   const Todo = struct("Todo", Description, Completed);
-  const Todos = variable<Array<VariableValue<typeof Todo>>>("Todos");
+  const Todos = variable("Todos", [] as Array<VariableValue<typeof Todo>>);
 
   const history = createHistory(
     Todos([Todo([Description("Write todo list app"), Completed(false)])])
@@ -370,8 +372,12 @@ describe("undo/redo with array of structs", () => {
     appending(Todos, Todo([Description("Write second item"), Completed(true)]))
   );
 
-  it("Allows retrieving the state of the first step", () => {
-    expect(history.get(0)[Todos]).toEqual([
+  history.push(
+    appending(Todos, Todo([Description("Bake"), Completed(false)]))
+  );
+
+  it("allows retrieving the state of the 1st step", () => {
+    expect(history.read(0, Todos)).toEqual([
       {
         [Description]: "Write todo list app",
         [Completed]: false,
@@ -379,8 +385,8 @@ describe("undo/redo with array of structs", () => {
     ]);
   });
 
-  it("Allows retrieving the state of the second step", () => {
-    expect(Array.from(history.get(1)[Todos])).toEqual([
+  it("allows retrieving the state of the 2nd step", () => {
+    expect(history.read(1, Todos)).toEqual([
       {
         [Description]: "Write todo list app",
         [Completed]: false,
@@ -388,6 +394,23 @@ describe("undo/redo with array of structs", () => {
       {
         [Description]: "Write second item",
         [Completed]: true,
+      },
+    ]);
+  });
+
+  it("allows retrieving the state of the 3rd step", () => {
+    expect(history.read(2, Todos)).toEqual([
+      {
+        [Description]: "Write todo list app",
+        [Completed]: false,
+      },
+      {
+        [Description]: "Write second item",
+        [Completed]: true,
+      },
+      {
+        [Description]: "Bake",
+        [Completed]: false,
       },
     ]);
   });

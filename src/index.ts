@@ -1,6 +1,6 @@
-export const parent = Symbol("parent");
+export const Parent = Symbol("parent");
 
-type VariableTypeBuilder<Type> = (a: Type) => { [x: string]: Type };
+type VariableTypeBuilder<Type> = (a: Type | ((source: any) => Type)) => { [x: string]: Type };
 export type Variable<Type = any> = symbol & (VariableTypeBuilder<Type>);
 export type VariableValue<V extends Variable> = V extends VariableTypeBuilder<infer Value> ? Record<symbol, Value> : never;
 
@@ -9,7 +9,9 @@ interface Field<Value> {
   [field]: Value;
 }
 
-export function variable<Type = any>(description: string | number): Variable<Type> {
+const DefaultValue = Symbol("default");
+
+export function variable<Type = any>(description: string | number, defaultValue: Type): Variable<Type> {
   // return Symbol(description);
   const prop = Symbol(description);
 
@@ -25,6 +27,7 @@ export function variable<Type = any>(description: string | number): Variable<Typ
     }
   }
   result[Symbol.toPrimitive] = () => prop;
+  result[DefaultValue] = defaultValue;
 
   return result as unknown as Variable<Type>;
 }
@@ -73,7 +76,7 @@ export function create(properties: Readonly<Record<Variable, any>>): typeof prop
 export function fork(source: Readonly<Record<Variable, any>>, changes: Readonly<Record<Variable, any>>): typeof source {
   const result = Object.create(source);
   defineInternal(result, changes);
-  Object.defineProperty(result, parent, { value: source, enumerable: true });
+  Object.defineProperty(result, Parent, { value: source, enumerable: true });
   // Object.setPrototypeOf(result, source);
   return Object.freeze(result);
 }
@@ -81,7 +84,7 @@ export function fork(source: Readonly<Record<Variable, any>>, changes: Readonly<
 export function changing<Value = any, Output = any>(prop: Variable<Value>, transform: (a: Value) => Output): { [x: string]: () => Output; } {
   return Object.freeze({
     [prop]() {
-      const current: Value = this[parent][prop];
+      const current: Value = this[Parent][prop];
       return transform(current);
     }
   });
@@ -90,7 +93,7 @@ export function changing<Value = any, Output = any>(prop: Variable<Value>, trans
 export function adding(prop: Variable<number>, amount: number): { [x: string]: () => number; } {
   return Object.freeze({
     [prop]() {
-      const current: number = this[parent][prop];
+      const current: number = this[Parent][prop];
       return current + amount;
     }
   });
@@ -99,7 +102,7 @@ export function adding(prop: Variable<number>, amount: number): { [x: string]: (
 export function prepending<Value = any>(prop: Variable<Iterable<Value>>, value: Value): { [prop: string]: () => Generator<Value, void, undefined>; } {
   return Object.freeze({
     *[prop]() {
-      const current: Iterable<Value> = this[parent][prop];
+      const current: Iterable<Value> = this[Parent][prop];
       yield value;
       yield* current;
     }
@@ -109,7 +112,7 @@ export function prepending<Value = any>(prop: Variable<Iterable<Value>>, value: 
 export function appending<Value = any>(prop: Variable<Iterable<Value>>, value: Value): { [prop: string]: () => Generator<Value, void, undefined>; } {
   return Object.freeze({
     *[prop]() {
-      const current: Iterable<Value> = this[parent][prop];
+      const current: Iterable<Value> = this[Parent][prop];
       yield* current;
       yield value;
     }
@@ -119,7 +122,7 @@ export function appending<Value = any>(prop: Variable<Iterable<Value>>, value: V
 export function mapping<Value = any, Output = any>(prop: Variable<Iterable<Value>>, transform: (a: Value) => Output): { [prop: string]: () => Generator<Output, void, undefined>; } {
   return Object.freeze({
     *[prop]() {
-      const current: Iterable<Value> = this[parent][prop];
+      const current: Iterable<Value> = this[Parent][prop];
       for (const value of current) {
         yield transform(value);
       }
@@ -127,13 +130,21 @@ export function mapping<Value = any, Output = any>(prop: Variable<Iterable<Value
   });
 }
 
+function flatten<Value>(value: Value, field: Variable<Value>) {
+  if (Array.isArray(field[DefaultValue])) {
+    return Array.from(value as unknown as Iterable<any>) as unknown as Value;
+  } else {
+    return value;
+  }
+}
+
 export function createHistory<Value>(initial: Readonly<Record<Variable<Value>, any>>) {
   let current = initial;
   const stack = [current] as any[];
 
   return Object.seal({
-    get(index: number) {
-      return stack[index];
+    read<Type>(index: number, field: Variable<Type>): Type {
+      return flatten(stack[index][field], field);
     },
     push(changes: Readonly<Record<Variable, any>>): void {
       current = fork(current, changes);
