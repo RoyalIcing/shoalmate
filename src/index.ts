@@ -157,10 +157,10 @@ export function createHistory<Value>(initial: Readonly<Record<Variable<Value>, a
 
 export const cursorSymbol = Symbol("cursor");
 
-export interface Cursor { readonly description: string };
+export interface Cursor { readonly description: string, readonly value: number };
 
-function makeCursor(value: string | number): Cursor {
-  return Object.freeze(Object(Symbol(value)));
+function makeCursor(value: number): Cursor {
+  return Object.freeze(Object.assign(Object(Symbol(value)), { value }));
 }
 
 function getCursorNumber(cursor: Cursor): number {
@@ -168,12 +168,6 @@ function getCursorNumber(cursor: Cursor): number {
 }
 
 const sharedState = new WeakMap<Cursor, Map<symbol, any>>();
-
-function copyStateFromTo(cursorA: Cursor, cursorB: Cursor): void {
-  const state = sharedState.get(cursorA);
-  const copiedState = state === undefined ? new Map() : new Map(state);
-  sharedState.set(cursorB, copiedState);
-}
 
 export interface Clock {
   readonly currentCursor: Cursor;
@@ -185,36 +179,37 @@ export interface Clock {
 }
 
 export function makeClock(): Clock {
-  let vectorClock = 0;
+  let currentCursor = makeCursor(0);
 
   return Object.seal({
-    currentCursor: makeCursor(vectorClock),
+    get currentCursor(): Cursor {
+      return currentCursor;
+    },
     reader(): (key: symbol) => unknown {
-      const cursor = this.currentCursor;
-      const f = readStateFor(cursor);
+      const cursor = currentCursor;
+      const f = readSharedStateFor(cursor);
       f[Symbol.toPrimitive] = () => cursor;
       f[cursorSymbol] = () => cursor;
       return f;
     },
     writer(): (key: symbol, value: any) => void {
-      const cursor = this.currentCursor;
+      const cursor = currentCursor;
       const f = (key, value) => {
-        if (cursor !== this.currentCursor) {
+        if (cursor !== currentCursor) {
           // Ignore
           return;
         }
         
-        setStateFor(this.currentCursor)(key, value);
+        setSharedStateFor(currentCursor)(key, value);
       }
       f[Symbol.toPrimitive] = () => cursor;
       f[cursorSymbol] = () => cursor;
       return f;
     },
     advance(): void {
-      vectorClock++;
-      const newCursor = makeCursor(vectorClock);
-      copyStateFromTo(this.currentCursor, newCursor);
-      this.currentCursor = newCursor;
+      const newCursor = makeCursor(currentCursor.value + 1);
+      copySharedStateFromTo(currentCursor, newCursor);
+      currentCursor = newCursor;
     },
     uniqueCount(cursors: Iterable<Cursor | Function>): number {
       const unique = new Set();
@@ -238,14 +233,20 @@ export function makeClock(): Clock {
   });
 }
 
-export function readStateFor(cursor: Cursor): (key: symbol) => any | undefined {
+function copySharedStateFromTo(cursorA: Cursor, cursorB: Cursor): void {
+  const state = sharedState.get(cursorA);
+  const copiedState = state === undefined ? new Map() : new Map(state);
+  sharedState.set(cursorB, copiedState);
+}
+
+export function readSharedStateFor(cursor: Cursor): (key: symbol) => any | undefined {
   return key => {
     const state = sharedState.get(cursor);
     return state?.get(key);
   }
 }
 
-export function setStateFor(cursor: Cursor): (key: symbol, value: any) => void {
+export function setSharedStateFor(cursor: Cursor): (key: symbol, value: any) => void {
   return (key, value) => {
     let state = sharedState.get(cursor);
     if (state === undefined) {

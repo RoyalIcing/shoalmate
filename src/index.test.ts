@@ -10,8 +10,8 @@ import {
   appending,
   changing,
   makeClock,
-  readStateFor,
-  setStateFor,
+  readSharedStateFor,
+  setSharedStateFor,
   mapping,
   struct,
   VariableValue,
@@ -422,7 +422,7 @@ describe("undo/redo with array of structs", () => {
 describe("Clocks", () => {
   it("has no state for new clocks and new symbol", () => {
     const clock = makeClock();
-    expect(readStateFor(clock.currentCursor)(Symbol())).toBeUndefined();
+    expect(readSharedStateFor(clock.currentCursor)(Symbol())).toBeUndefined();
   });
 
   it("has reader and write with cursor references", () => {
@@ -438,9 +438,9 @@ describe("Clocks", () => {
   it("stores state", () => {
     const clock = makeClock();
     const key = Symbol();
-    setStateFor(clock.currentCursor)(key, 7);
+    setSharedStateFor(clock.currentCursor)(key, 7);
 
-    expect(readStateFor(clock.currentCursor)(key)).toBe(7);
+    expect(readSharedStateFor(clock.currentCursor)(key)).toBe(7);
     expect(clock.reader()(key)).toBe(7);
   });
 
@@ -456,9 +456,9 @@ describe("Clocks", () => {
     const clock = makeClock();
     const key = Symbol();
     const reader = clock.reader();
-    setStateFor(clock.currentCursor)(key, 7);
+    setSharedStateFor(clock.currentCursor)(key, 7);
     clock.advance();
-    expect(readStateFor(clock.currentCursor)(key)).toBe(7);
+    expect(readSharedStateFor(clock.currentCursor)(key)).toBe(7);
 
     expect(reader(key)).toBe(7);
     expect(clock.reader()(key)).toBe(7);
@@ -469,14 +469,14 @@ describe("Clocks", () => {
     const key = Symbol();
     const reader = clock.reader();
     const cursorA = clock.currentCursor;
-    setStateFor(cursorA)(key, 7);
+    setSharedStateFor(cursorA)(key, 7);
     clock.advance();
 
     const cursorB = clock.currentCursor;
-    setStateFor(cursorB)(key, 9);
+    setSharedStateFor(cursorB)(key, 9);
 
-    expect(readStateFor(cursorA)(key)).toBe(7);
-    expect(readStateFor(clock.currentCursor)(key)).toBe(9);
+    expect(readSharedStateFor(cursorA)(key)).toBe(7);
+    expect(readSharedStateFor(clock.currentCursor)(key)).toBe(9);
 
     expect(reader(key)).toBe(7);
     expect(clock.reader()(key)).toBe(9);
