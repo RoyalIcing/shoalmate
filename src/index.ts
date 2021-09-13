@@ -130,8 +130,8 @@ export function mapping<Value = any, Output = any>(prop: Variable<Iterable<Value
   });
 }
 
-function flatten<Value>(value: Value, field: Variable<Value>) {
-  if (Array.isArray(field[DefaultValue])) {
+function flatten<Value>(value: Value | undefined, field: Variable<Value>): Value | undefined {
+  if (Array.isArray(field[DefaultValue]) && value !== undefined && value[Symbol.iterator] !== undefined) {
     return Array.from(value as unknown as Iterable<any>) as unknown as Value;
   } else {
     return value;
@@ -139,16 +139,28 @@ function flatten<Value>(value: Value, field: Variable<Value>) {
 }
 
 export function createHistory<Value>(initial: Readonly<Record<Variable<Value>, any>>) {
-  let current = initial;
-  const stack = [current] as any[];
+  const stack: Array<Readonly<Record<Variable<Value>, any>>> = [initial];
+  let currentIndex = 0;
 
   return Object.seal({
-    read<Type>(index: number, field: Variable<Type>): Type {
-      return flatten(stack[index][field], field);
+    read<Type>(field: Variable<Type>): Type {
+      return flatten(stack[currentIndex][field], field);
+    },
+    readAt<Type>(index: number, field: Variable<Type>): Type {
+      return flatten(stack[index] === undefined ? undefined : stack[index][field], field);
     },
     push(changes: Readonly<Record<Variable, any>>): void {
-      current = fork(current, changes);
-      stack.push(current);
+      stack.splice(currentIndex + 1);
+      stack.push(fork(stack[currentIndex], changes));
+      currentIndex++;
+    },
+    get canUndo(): boolean { return currentIndex > 0; },
+    get canRedo(): boolean { return currentIndex + 1 < stack.length; },
+    undo() {
+      currentIndex = Math.max(0, currentIndex - 1);
+    },
+    redo() {
+      currentIndex = Math.min(currentIndex + 1, stack.length - 1);
     }
   });
 }

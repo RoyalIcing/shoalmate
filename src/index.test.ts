@@ -364,20 +364,30 @@ describe("undo/redo with array of structs", () => {
   const Todo = struct("Todo", Description, Completed);
   const Todos = variable("Todos", [] as Array<VariableValue<typeof Todo>>);
 
-  const history = createHistory(
-    Todos([Todo([Description("Write todo list app"), Completed(false)])])
-  );
+  function subject() {
+    return createHistory(
+      Todos([Todo([Description("Write todo list app"), Completed(false)])])
+    );
+  }
+  let history: ReturnType<typeof subject>;
 
-  history.push(
-    appending(Todos, Todo([Description("Write second item"), Completed(true)]))
-  );
+  beforeEach(() => {
+    history = subject();
 
-  history.push(
-    appending(Todos, Todo([Description("Bake"), Completed(false)]))
-  );
+    history.push(
+      appending(
+        Todos,
+        Todo([Description("Write second item"), Completed(true)])
+      )
+    );
 
-  it("allows retrieving the state of the 1st step", () => {
-    expect(history.read(0, Todos)).toEqual([
+    history.push(
+      appending(Todos, Todo([Description("Bake"), Completed(false)]))
+    );
+  });
+
+  it("allows reading the state of the 1st step", () => {
+    expect(history.readAt(0, Todos)).toEqual([
       {
         [Description]: "Write todo list app",
         [Completed]: false,
@@ -385,8 +395,8 @@ describe("undo/redo with array of structs", () => {
     ]);
   });
 
-  it("allows retrieving the state of the 2nd step", () => {
-    expect(history.read(1, Todos)).toEqual([
+  it("allows reading the state of the 2nd step", () => {
+    expect(history.readAt(1, Todos)).toEqual([
       {
         [Description]: "Write todo list app",
         [Completed]: false,
@@ -398,8 +408,8 @@ describe("undo/redo with array of structs", () => {
     ]);
   });
 
-  it("allows retrieving the state of the 3rd step", () => {
-    expect(history.read(2, Todos)).toEqual([
+  it("allows reading the state of the 3rd step", () => {
+    expect(history.readAt(2, Todos)).toEqual([
       {
         [Description]: "Write todo list app",
         [Completed]: false,
@@ -415,8 +425,132 @@ describe("undo/redo with array of structs", () => {
     ]);
   });
 
-  it.todo("Allows undoing");
-  it.todo("Allows redoing");
+  it("returns undefined for a non-existent step", () => {
+    expect(history.readAt(3, Todos)).toBeUndefined();
+  });
+
+  it("allows reading the current state", () => {
+    expect(history.read(Todos)).toEqual([
+      {
+        [Description]: "Write todo list app",
+        [Completed]: false,
+      },
+      {
+        [Description]: "Write second item",
+        [Completed]: true,
+      },
+      {
+        [Description]: "Bake",
+        [Completed]: false,
+      },
+    ]);
+  });
+
+  it("Allows undoing", () => {
+    expect(history.canUndo).toBe(true);
+    expect(history.canRedo).toBe(false);
+
+    history.undo();
+    expect(history.canRedo).toBe(true);
+    expect(history.read(Todos)).toEqual([
+      {
+        [Description]: "Write todo list app",
+        [Completed]: false,
+      },
+      {
+        [Description]: "Write second item",
+        [Completed]: true,
+      },
+    ]);
+
+    expect(history.canUndo).toBe(true);
+    history.undo();
+    expect(history.canRedo).toBe(true);
+    expect(history.read(Todos)).toEqual([
+      {
+        [Description]: "Write todo list app",
+        [Completed]: false,
+      },
+    ]);
+
+    expect(history.canUndo).toBe(false);
+    history.undo();
+    expect(history.canRedo).toBe(true);
+    expect(history.read(Todos)).toEqual([
+      {
+        [Description]: "Write todo list app",
+        [Completed]: false,
+      },
+    ]);
+  });
+
+  it("Allows redoing", () => {
+    history.undo();
+    history.undo();
+    history.redo();
+    expect(history.canUndo).toBe(true);
+    expect(history.canRedo).toBe(true);
+    expect(history.read(Todos)).toEqual([
+      {
+        [Description]: "Write todo list app",
+        [Completed]: false,
+      },
+      {
+        [Description]: "Write second item",
+        [Completed]: true,
+      },
+    ]);
+
+    history.redo();
+    expect(history.canUndo).toBe(true);
+    expect(history.canRedo).toBe(false);
+    expect(history.read(Todos)).toEqual([
+      {
+        [Description]: "Write todo list app",
+        [Completed]: false,
+      },
+      {
+        [Description]: "Write second item",
+        [Completed]: true,
+      },
+      {
+        [Description]: "Bake",
+        [Completed]: false,
+      },
+    ]);
+
+    history.redo();
+    expect(history.canUndo).toBe(true);
+    expect(history.canRedo).toBe(false);
+    expect(history.read(Todos)).toEqual([
+      {
+        [Description]: "Write todo list app",
+        [Completed]: false,
+      },
+      {
+        [Description]: "Write second item",
+        [Completed]: true,
+      },
+      {
+        [Description]: "Bake",
+        [Completed]: false,
+      },
+    ]);
+
+    history.undo();
+    expect(history.canUndo).toBe(true);
+    expect(history.canRedo).toBe(true);
+    expect(history.read(Todos)).toEqual([
+      {
+        [Description]: "Write todo list app",
+        [Completed]: false,
+      },
+      {
+        [Description]: "Write second item",
+        [Completed]: true,
+      },
+    ]);
+  });
 });
 
 describe("Clocks", () => {
